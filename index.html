@@ -4,7 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Control de Calidad · Toldos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#F3F1EC">
+<meta name="color-scheme" content="light only">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="CC Toldos">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
+  /* La app es de tema claro fijo. Forzarlo evita que el modo oscuro del móvil
+     tiña campos/fondos y, sobre todo, que el informe salga negro en el PDF. */
+  :root{ color-scheme: light; }
+  html, body{ color-scheme: light; background:#F3F1EC; }
   :root{
     --bg:#F3F1EC;
     --surface:#FFFFFF;
@@ -2194,16 +2206,41 @@ document.getElementById('btnGenerate').addEventListener('click', ()=>{
   });
 });
 
+// Rasteriza el informe a un canvas OPACO sobre fondo blanco. Se hace en dos
+// pasos a propósito:
+//  1) html2canvas puede devolver un canvas con zonas transparentes (según el
+//     dispositivo / modo oscuro del móvil). Si eso se pasa a JPEG, las zonas
+//     transparentes salen NEGRAS (el JPEG no tiene transparencia) -> PDF negro.
+//  2) Por eso se copia el resultado sobre un canvas relleno de blanco antes de
+//     exportar, y se fuerza esquema de color claro en el clon.
+async function rasterizarInforme(contenido){
+  const escala = Math.min(2, Math.max(1, window.devicePixelRatio || 1.5));
+  const src = await html2canvas(contenido, {
+    backgroundColor: '#ffffff',
+    scale: escala,
+    ignoreElements: el => el.tagName === 'VIDEO',
+    onclone: (doc) => {
+      doc.documentElement.style.colorScheme = 'light';
+      const rc = doc.getElementById('reportContent');
+      if (rc) { rc.style.background = '#ffffff'; rc.style.colorScheme = 'light'; }
+    }
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = src.width;
+  canvas.height = src.height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(src, 0, 0);
+  return canvas;
+}
+
 async function descargarInformePdf(pedidoId){
   const { jsPDF } = window.jspdf;
   const contenido = document.getElementById('reportContent');
   // Los <video> no se pueden rasterizar a PDF: se omiten (en su lugar el PDF
   // deja el hueco). El vídeo se ve en el informe en pantalla y se sube aparte.
-  const canvas = await html2canvas(contenido, {
-    backgroundColor:'#ffffff',
-    scale:2,
-    ignoreElements: el => el.tagName === 'VIDEO'
-  });
+  const canvas = await rasterizarInforme(contenido);
   const imgData = canvas.toDataURL('image/jpeg', 0.92);
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -2681,7 +2718,20 @@ function getDriveUrl(){ return lsGet(DRIVE_URL_KEY); }
 function setDriveUrl(v){ lsSet(DRIVE_URL_KEY, v); }
 function getMetodo(){ return lsGet(DRIVE_METODO_KEY) || 'appsscript'; }
 function setMetodo(v){ lsSet(DRIVE_METODO_KEY, v); }
-function getGapiClientId(){ return lsGet(GAPI_CLIENT_KEY); }
+// ID de cliente OAuth por defecto (proyecto de Google Cloud del equipo).
+// No es un secreto (va incrustado en cualquier web que use OAuth). Cada operario
+// inicia sesión con SU cuenta; el álbum se crea en la cuenta con la que entra.
+// Se puede sobrescribir escribiendo otro ID en Ajustes.
+const GAPI_CLIENT_DEFAULT = '517298249272-3s1622h4c4b8altalhap76cdufmr9mkd.apps.googleusercontent.com';
+function limpiaClientId(v){
+  // Deja solo los caracteres que puede tener un client_id (quita espacios,
+  // barras, saltos de línea y caracteres invisibles que mete el pegar en móvil).
+  return (v || '').replace(/[^0-9A-Za-z.\-]/g, '');
+}
+function getGapiClientId(){
+  const v = limpiaClientId(lsGet(GAPI_CLIENT_KEY));
+  return /^\d[0-9A-Za-z-]*\.apps\.googleusercontent\.com$/.test(v) ? v : GAPI_CLIENT_DEFAULT;
+}
 function getGapiFolderId(){ return lsGet(GAPI_FOLDER_KEY); }
 const GAPI_EMAIL_KEY = 'revisionToldos:gapiEmail';
 function getGapiEmail(){ return lsGet(GAPI_EMAIL_KEY); }
@@ -2770,13 +2820,14 @@ document.getElementById('driveProbar').addEventListener('click', async ()=>{
   }
 });
 document.getElementById('gapiGuardar').addEventListener('click', ()=>{
-  lsSet(GAPI_CLIENT_KEY, gapiClientInput.value);
+  const idLimpio = limpiaClientId(gapiClientInput.value);
+  lsSet(GAPI_CLIENT_KEY, idLimpio);
+  gapiClientInput.value = getGapiClientId(); // muestra el que se va a usar (limpio o el por defecto)
   lsSet(GAPI_FOLDER_KEY, gapiFolderInput.value);
   lsSet(GAPI_EMAIL_KEY, gapiEmailInput.value);
   _accessToken = null; _accessTokenScope = ''; // por si cambió el correo/cliente
-  gapiEstado.textContent = getGapiClientId()
-    ? 'Guardado. Pulsa "Conectar" e inicia sesión con ' + (getGapiEmail() || 'tu cuenta de Google') + '.'
-    : 'Falta el ID de cliente OAuth.';
+  gapiEstado.textContent = 'Guardado. Pulsa "Conectar" e inicia sesión con ' +
+    (getGapiEmail() || 'tu cuenta de Google') + '.';
 });
 
 async function conectarGoogle(forzarCuenta){
@@ -3255,6 +3306,14 @@ async function onSubirDrive(ev){
 
 // ---------- Init ----------
 renderAll();
+</script>
+<script>
+// PWA: registra el service worker (permite instalarla como app y abrirla offline).
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW no registrado:', e));
+  });
+}
 </script>
 </body>
 </html>
