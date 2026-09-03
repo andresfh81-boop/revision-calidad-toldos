@@ -6,8 +6,9 @@
  *    se actualiza en segundo plano.
  * Sube una versión nueva de este archivo (cambia VERSION) para forzar limpieza de caché.
  */
-const VERSION = 'cct-v3-20260903';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const VERSION = 'cct-v4-20260903';
+const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png',
+  './vendor/html2canvas.min.js', './vendor/jspdf.umd.min.js'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

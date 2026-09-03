@@ -1085,8 +1085,8 @@
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="vendor/html2canvas.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" crossorigin="anonymous"></script>
 <!-- Google Identity Services: solo se usa si eliges el método "Cuenta de Google" para subir vídeos grandes. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -1134,12 +1134,10 @@
     </div>
     <button class="manual-btn" id="ajustesBtn" style="margin-top:8px;">⚙️ Ajustes de subida a Drive</button>
     <div class="manual-form" id="ajustesForm">
-      <div class="mf-field">
+      <div class="mf-field" style="display:none;">
         <label class="mf-label">Método de subida</label>
         <select id="driveMetodo">
-          <option value="appsscript">Script de Apps Script — sin login, hasta ~50 MB/archivo</option>
-          <option value="gapi">Google Drive (API) — login, vídeos de gran tamaño</option>
-          <option value="photos">Google Fotos — un álbum por pedido</option>
+          <option value="gapi">Google Drive (API)</option>
         </select>
       </div>
 
@@ -1168,7 +1166,7 @@
         </div>
         <div class="mf-field" id="ajustesGapiFolder">
           <label class="mf-label">ID carpeta destino (opcional)</label>
-          <input id="gapiFolderId" placeholder="vacío = carpeta 'Revisiones Toldos' en Mi unidad" autocapitalize="off" autocorrect="off" spellcheck="false">
+          <input id="gapiFolderId" placeholder="vacío = crea/usa 'Revisiones Toldos' en Mi unidad" autocapitalize="off" autocorrect="off" spellcheck="false">
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button id="gapiGuardar">Guardar</button>
@@ -2175,7 +2173,7 @@ document.getElementById('btnGenerate').addEventListener('click', ()=>{
       </div>
     </div>
     <div class="rep-actions">
-      <button class="btn-drive" id="btnSubirDrive">Subir fotos/vídeos a Drive</button>
+      <button class="btn-drive" id="btnSubirDrive">Subir / actualizar en Drive</button>
       <button class="btn-pdf" id="btnDescargarPdf">Descargar PDF</button>
       <button class="close-report" id="closeReport">Cerrar</button>
     </div>
@@ -2183,6 +2181,11 @@ document.getElementById('btnGenerate').addEventListener('click', ()=>{
   document.getElementById('overlay').classList.add('show');
   pintarEnlaceDrive();
   document.getElementById('btnSubirDrive').addEventListener('click', onSubirDrive);
+  // Subida automática (fotos + vídeos + PDF) al generar el informe, si ya hay
+  // sesión de Google abierta. Si no, el operario pulsa el botón de arriba.
+  if(getMetodo() === 'gapi' && _accessToken){
+    onSubirDrive();
+  }
   document.querySelectorAll('.rep-foto:not(.rep-foto-video)').forEach(img=>{
     img.addEventListener('click', ()=>{
       document.getElementById('lightboxImg').src = img.src;
@@ -2721,7 +2724,7 @@ const lsSet = (k,v)=>{ try{ localStorage.setItem(k,(v||'').trim()); }catch(e){} 
 
 function getDriveUrl(){ return lsGet(DRIVE_URL_KEY); }
 function setDriveUrl(v){ lsSet(DRIVE_URL_KEY, v); }
-function getMetodo(){ return lsGet(DRIVE_METODO_KEY) || 'appsscript'; }
+function getMetodo(){ return 'gapi'; } // app fijada a Google Drive (API)
 function setMetodo(v){ lsSet(DRIVE_METODO_KEY, v); }
 // ID de cliente OAuth por defecto (proyecto de Google Cloud del equipo).
 // No es un secreto (va incrustado en cualquier web que use OAuth). Cada operario
@@ -2775,7 +2778,7 @@ gapiFolderInput.value = getGapiFolderId();
 gapiEmailInput.value = getGapiEmail();
 metodoSelect.value = getMetodo();
 
-const AYUDA_GAPI = 'Crea un proyecto en Google Cloud, activa la <b>Google Drive API</b> y un <b>ID de cliente OAuth</b> tipo "aplicación web" con este dominio en "orígenes autorizados". Ámbito <b>drive.file</b> (sin verificación de Google). Sube por partes (resumible): admite vídeos de varios GB. Ver archivo <b>revision-toldos-DRIVE-cuenta-google.txt</b>.';
+const AYUDA_GAPI = 'Inicia sesión con tu cuenta de Google. Se crea (o reutiliza) la carpeta <b>Revisiones Toldos</b> en tu Drive y, dentro, una subcarpeta por pedido con las fotos, los vídeos y el PDF del informe. Ámbito <b>drive.file</b>: la app solo ve lo que ella misma crea. Sube por partes (resumible): admite vídeos de varios GB.';
 const AYUDA_PHOTOS = 'Igual que arriba pero activando la <b>Photos Library API</b>. Crea automáticamente un <b>álbum por pedido</b> (nombre = número de pedido), sube ahí las fotos y vídeos y pone el enlace del álbum en el informe. Los ámbitos de Google Fotos son sensibles: sin verificar la app, cada usuario debe añadirse como "usuario de prueba" y volver a iniciar sesión cada ~7 días. Ver archivo <b>revision-toldos-FOTOS-google.txt</b>.';
 
 function pintarMetodo(){
@@ -2918,10 +2921,9 @@ async function googleUserInfo(token){
 }
 
 /* ---- API de Drive: carpeta del pedido + subida resumible ---- */
-async function driveBuscarOCrearCarpeta(pedido, token){
-  const parent = getGapiFolderId() || 'root';
+async function driveCarpetaPorNombre(nombre, parent, token){
   const q = "mimeType='application/vnd.google-apps.folder' and name='" +
-    pedido.replace(/'/g, "\\'") + "' and trashed=false and '" + parent + "' in parents";
+    nombre.replace(/'/g, "\\'") + "' and trashed=false and '" + parent + "' in parents";
   const r = await fetch(GOOGLE_API_BASE + '/drive/v3/files?spaces=drive&fields=files(id,name)&q=' + encodeURIComponent(q),
     { headers: { Authorization: 'Bearer ' + token } });
   if(r.ok){
@@ -2931,10 +2933,36 @@ async function driveBuscarOCrearCarpeta(pedido, token){
   const cr = await fetch(GOOGLE_API_BASE + '/drive/v3/files?fields=id', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: pedido, mimeType: 'application/vnd.google-apps.folder', parents: [parent] })
+    body: JSON.stringify({ name: nombre, mimeType: 'application/vnd.google-apps.folder', parents: [parent] })
   });
-  if(!cr.ok) throw new Error('no se pudo crear la carpeta (' + cr.status + ')');
+  if(!cr.ok) throw new Error('no se pudo crear la carpeta "' + nombre + '" (' + cr.status + ')');
   return (await cr.json()).id;
+}
+
+// Carpeta del pedido. Si en Ajustes no se ha fijado una carpeta destino, se
+// crea/usa una carpeta "Revisiones Toldos" en Mi unidad y el pedido cuelga de ahí.
+async function driveBuscarOCrearCarpeta(pedido, token){
+  let parent = getGapiFolderId();
+  if(!parent) parent = await driveCarpetaPorNombre('Revisiones Toldos', 'root', token);
+  return driveCarpetaPorNombre(pedido, parent, token);
+}
+
+// Archivos que ya hay en la carpeta (nombre -> id), para reemplazar en vez de
+// duplicar si se vuelve a subir el mismo pedido.
+async function driveArchivosEnCarpeta(folderId, token){
+  const q = "'" + folderId + "' in parents and trashed=false";
+  const r = await fetch(GOOGLE_API_BASE + '/drive/v3/files?fields=files(id,name)&q=' + encodeURIComponent(q),
+    { headers: { Authorization: 'Bearer ' + token } });
+  const map = {};
+  if(r.ok){ const j = await r.json(); (j.files || []).forEach(f => { map[f.name] = f.id; }); }
+  return map;
+}
+async function driveBorrarArchivo(id, token){
+  try{
+    await fetch(GOOGLE_API_BASE + '/drive/v3/files/' + id, {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + token }
+    });
+  }catch(e){}
 }
 
 async function driveSubidaResumible(blob, filename, mimeType, folderId, token, onFrac){
@@ -3172,6 +3200,7 @@ async function subirViaGoogle(pedidoId, items, onProgress){
   const base = String(pedidoId).replace(/[\\/:*?"<>|]/g,'_');
   const folderId = await driveBuscarOCrearCarpeta(base, token);
   const folderUrl = 'https://drive.google.com/drive/folders/' + folderId;
+  const existentes = await driveArchivosEnCarpeta(folderId, token);
   const fallos = [];
   for(let i=0; i<items.length; i++){
     onProgress && onProgress(i, items.length, 0);
@@ -3180,17 +3209,20 @@ async function subirViaGoogle(pedidoId, items, onProgress){
       const mime = blob.type || 'application/octet-stream';
       const filename = `${items[i].nombreBase}.${extDeMime(mime)}`;
       const tk = await getGoogleToken(false);
+      if(existentes[filename]) await driveBorrarArchivo(existentes[filename], tk);
       await driveSubidaResumible(blob, filename, mime, folderId, tk,
         (frac)=> onProgress && onProgress(i, items.length, frac));
     }catch(err){
       fallos.push(items[i].nombreBase + ': ' + (err.message || err));
     }
   }
-  // Sube también el PDF del informe a la misma carpeta del pedido.
+  // Sube también el PDF del informe a la misma carpeta del pedido, reemplazándolo
+  // si ya existe para que la carpeta refleje siempre el informe más reciente.
   try{
     const pdf = await construirPdfInforme();
     const blob = pdf.output('blob');
     const tk = await getGoogleToken(false);
+    if(existentes[base + '.pdf']) await driveBorrarArchivo(existentes[base + '.pdf'], tk);
     await driveSubidaResumible(blob, base + '.pdf', 'application/pdf', folderId, tk);
   }catch(err){
     fallos.push('informe.pdf: ' + (err.message || err));
@@ -3231,7 +3263,7 @@ async function subirViaPhotos(pedidoId, items, onProgress){
 
 async function subirTodoADrive(pedidoId, onProgress){
   const items = recopilarMediaDelPedido(pedidoId);
-  if(!items.length) throw new Error('Este pedido no tiene ninguna foto ni vídeo que subir.');
+  // Aunque no haya fotos ni vídeos, se sube igualmente el PDF del informe.
   const m = getMetodo();
   if(m === 'gapi')   return subirViaGoogle(pedidoId, items, onProgress);
   if(m === 'photos') return subirViaPhotos(pedidoId, items, onProgress);
@@ -3277,7 +3309,7 @@ function pintarEnlaceDrive(){
 }
 
 async function onSubirDrive(ev){
-  const btn = ev.currentTarget;
+  const btn = (ev && ev.currentTarget) || document.getElementById('btnSubirDrive');
   const cont = document.getElementById('repDriveLink');
   if(!configuradoAlgunMetodo()){
     cont.className = 'rep-drive-link error';
