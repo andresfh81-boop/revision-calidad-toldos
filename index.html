@@ -2235,19 +2235,19 @@ async function rasterizarInforme(contenido){
   return canvas;
 }
 
-async function descargarInformePdf(pedidoId){
+// Construye el PDF del informe (jsPDF). Se reutiliza para descargarlo y para
+// subirlo a la carpeta de Drive del pedido.
+async function construirPdfInforme(){
   const { jsPDF } = window.jspdf;
-  const contenido = document.getElementById('reportContent');
-  // Los <video> no se pueden rasterizar a PDF: se omiten (en su lugar el PDF
-  // deja el hueco). El vídeo se ve en el informe en pantalla y se sube aparte.
-  const canvas = await rasterizarInforme(contenido);
+  // Los <video> no se pueden rasterizar a PDF: se omiten. El vídeo se ve en el
+  // informe en pantalla y se sube aparte a la carpeta.
+  const canvas = await rasterizarInforme(document.getElementById('reportContent'));
   const imgData = canvas.toDataURL('image/jpeg', 0.92);
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const imgWidth = pageWidth;
   const imgHeight = canvas.height * imgWidth / canvas.width;
-
   let heightLeft = imgHeight;
   let position = 0;
   pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
@@ -2258,6 +2258,11 @@ async function descargarInformePdf(pedidoId){
     pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
     heightLeft -= pageHeight;
   }
+  return pdf;
+}
+
+async function descargarInformePdf(pedidoId){
+  const pdf = await construirPdfInforme();
   // El nombre del archivo es el número de pedido, para identificarlo al subirlo a Drive.
   pdf.save(`${pedidoId}.pdf`);
 }
@@ -3180,6 +3185,15 @@ async function subirViaGoogle(pedidoId, items, onProgress){
     }catch(err){
       fallos.push(items[i].nombreBase + ': ' + (err.message || err));
     }
+  }
+  // Sube también el PDF del informe a la misma carpeta del pedido.
+  try{
+    const pdf = await construirPdfInforme();
+    const blob = pdf.output('blob');
+    const tk = await getGoogleToken(false);
+    await driveSubidaResumible(blob, base + '.pdf', 'application/pdf', folderId, tk);
+  }catch(err){
+    fallos.push('informe.pdf: ' + (err.message || err));
   }
   onProgress && onProgress(items.length, items.length, 0);
   return { folderUrl, total: items.length, fallos };

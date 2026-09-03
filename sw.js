@@ -6,7 +6,7 @@
  *    se actualiza en segundo plano.
  * Sube una versión nueva de este archivo (cambia VERSION) para forzar limpieza de caché.
  */
-const VERSION = 'cct-v2-20260902';
+const VERSION = 'cct-v3-20260903';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
