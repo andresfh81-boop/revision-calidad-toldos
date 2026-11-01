@@ -6,7 +6,7 @@
  *    se actualiza en segundo plano.
  * Sube una versión nueva de este archivo (cambia VERSION) para forzar limpieza de caché.
  */
-const VERSION = 'cct-v4-20260903';
+const VERSION = 'cct-v5-20261101';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png',
   './vendor/html2canvas.min.js', './vendor/jspdf.umd.min.js'];
 
@@ -18,10 +18,11 @@ self.addEventListener('install', (event) => {
   );
 });
 
+// Solo borra copias viejas de esta app: todas las apps de andresfh81-boop.github.io comparten las copias guardadas.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('cct-') && k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
